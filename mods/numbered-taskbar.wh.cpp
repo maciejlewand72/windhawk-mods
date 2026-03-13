@@ -30,8 +30,12 @@ the respective applications.
 
 - fontSize: 16
   $name: Font Size
+- fontFamily: Segoe UI
+  $name: Font Family
 - fontColor: 0xFFFFFFFF
   $name: Font Color (ARGB)
+- showOutline: true
+  $name: Show Outline
 - outlineColor: 0xFF000000
   $name: Outline Color (ARGB)
 - offsetX: 2
@@ -57,8 +61,10 @@ the respective applications.
 
 struct ModSettings {
   int fontSize;
+  std::wstring fontFamily;
   UINT32 fontColor;
   UINT32 outlineColor;
+  bool showOutline;
   int offsetX;
   int offsetY;
   int updateIntervalMs;
@@ -87,8 +93,14 @@ HWINEVENTHOOK g_winEventHook = NULL;
 void LoadSettings() {
   ModSettings newSettings;
   newSettings.fontSize = Wh_GetIntSetting(L"fontSize");
+  PCWSTR fontFamily = Wh_GetStringSetting(L"fontFamily");
+  if (fontFamily) {
+    newSettings.fontFamily = fontFamily;
+    Wh_FreeStringSetting(fontFamily);
+  } else newSettings.fontFamily = L"Segoe UI";
   newSettings.fontColor = Wh_GetIntSetting(L"fontColor");
   newSettings.outlineColor = Wh_GetIntSetting(L"outlineColor");
+  newSettings.showOutline = Wh_GetIntSetting(L"showOutline");
   newSettings.offsetX = Wh_GetIntSetting(L"offsetX");
   newSettings.offsetY = Wh_GetIntSetting(L"offsetY");
   newSettings.showOnlyOnWinKey = Wh_GetIntSetting(L"showOnlyOnWinKey") != 0;
@@ -247,7 +259,18 @@ void DrawNumbers(const std::vector<RECT> &rects, HWND hwndTaskbar, const ModSett
 
   if (width <= 0 || height <= 0) return;
 
-  SetWindowPos(g_overlayHwnd, HWND_TOPMOST, taskbarRect.left, taskbarRect.top, width, height, SWP_NOACTIVATE);
+  bool isTaskbarTopmost = (GetWindowLong(hwndTaskbar, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+  bool isOverlayTopmost = (GetWindowLong(g_overlayHwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+  if (isTaskbarTopmost != isOverlayTopmost)
+    SetWindowPos(g_overlayHwnd, isTaskbarTopmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+  HWND hwndPrev = GetWindow(hwndTaskbar, GW_HWNDPREV);
+  if (hwndPrev == g_overlayHwnd)
+    SetWindowPos(g_overlayHwnd, NULL, taskbarRect.left, taskbarRect.top, width, height, SWP_NOACTIVATE | SWP_NOZORDER);
+  else {
+    HWND hwndInsertAfter = hwndPrev ? hwndPrev : HWND_TOP;
+    SetWindowPos(g_overlayHwnd, hwndInsertAfter, taskbarRect.left, taskbarRect.top, width, height, SWP_NOACTIVATE);
+  }
 
   if (width != cachedWidth || height != cachedHeight) {
     if (hBitmap) {
@@ -300,7 +323,7 @@ void DrawNumbers(const std::vector<RECT> &rects, HWND hwndTaskbar, const ModSett
 
     IDWriteTextFormat *pTextFormat = nullptr;
     if (g_pDWriteFactory) {
-      g_pDWriteFactory->CreateTextFormat(L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+        g_pDWriteFactory->CreateTextFormat(settings.fontFamily.c_str(), NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, (FLOAT)settings.fontSize, L"en-us", &pTextFormat);
     }
 
@@ -332,10 +355,12 @@ void DrawNumbers(const std::vector<RECT> &rects, HWND hwndTaskbar, const ModSett
 
         IDWriteTextLayout *pTextLayout = nullptr;
         g_pDWriteFactory->CreateTextLayout(text.c_str(), text.length(), pTextFormat, 1000.0f, 1000.0f, &pTextLayout);
-        if (pTextLayout && pTextBrush && pOutlineBrush) {
+        if (pTextLayout && pTextBrush) {
+          if (settings.showOutline && pOutlineBrush) {
           float offsets[8][2] = {{-2, -2}, {0, -2}, {2, -2}, {-2, 0}, {2, 0},   {-2, 2}, {0, 2},  {2, 2}};
           for (int i = 0; i < 8; i++)
             pDCRT->DrawTextLayout(D2D1::Point2F(x + offsets[i][0], y + offsets[i][1]), pTextLayout, pOutlineBrush);
+          }
           pDCRT->DrawTextLayout(D2D1::Point2F(x, y), pTextLayout, pTextBrush);
           pTextLayout->Release();
         }
